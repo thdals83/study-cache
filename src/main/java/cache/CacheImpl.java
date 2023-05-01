@@ -1,6 +1,7 @@
 package cache;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -10,79 +11,39 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 public class CacheImpl<T> implements Cache<T> {
-    public void raceCondition() {
-        List<String> f = new ArrayList<>();
-
-        CompletableFuture c1 = CompletableFuture.supplyAsync(() -> {
-            f.add("ss");
-            return "";
-        });
-        CompletableFuture c2 = CompletableFuture.supplyAsync(() -> {
-            f.add("ss");
-            return "";
-        });
-        CompletableFuture c3 = CompletableFuture.supplyAsync(() -> {
-            f.add("ss");
-            return "";
-        });
-        c1.join();
-        c2.join();
-        c3.join();
-
-    }
-
-    private int increase(final int target, final int count) {
-//        final int res;
-
-        return IntStream.range(0, count).sum();
-
-//        for (int i = 0; i < count; i++) {
-//            res = res + 1;
-//        }
-//        return res;
-    }
-
-    private int increaseRecursive(final int target, final int count) {
-        if (count == 0) {
-            return target;
-        }
-
-        return increaseRecursive(target + 1, count - 1);
-    }
     public static final long PERMANENT = -1L;
 
     private static final CacheImpl<?> INSTANCE = new CacheImpl<>();
 
     private final ConcurrentHashMap<String, T> caches;
     private final ConcurrentHashMap<String, Long> cacheTTL;
-//    private final ScheduledExecutorService executorServiceForTTL;
+    private final ScheduledExecutorService executorServiceForTTL;
 
     public CacheImpl() {
         this.caches = new ConcurrentHashMap<>();
         this.cacheTTL = new ConcurrentHashMap<>();
-//        this.executorServiceForTTL = Executors.newSingleThreadScheduledExecutor();
-//        removeExpiredTimeKey();
+        this.executorServiceForTTL = Executors.newSingleThreadScheduledExecutor();
+        removeExpiredTimeKey();
     }
 
     public static <T> CacheImpl<T> getInstance() {
         return (CacheImpl<T>) INSTANCE;
     }
 
-//    private void removeExpiredTimeKey() {
-//        executorServiceForTTL.scheduleAtFixedRate(() -> cacheTTL.entrySet().removeIf(entry -> {
-//            if (isExpiration(entry.getValue())) {
-//                caches.remove(entry.getKey());
-//                return true;
-//            }
-//            return false;
-//        }), 1, 1, TimeUnit.SECONDS);
-//    }
+    private void removeExpiredTimeKey() {
+        executorServiceForTTL.scheduleAtFixedRate(() -> cacheTTL.entrySet().removeIf(entry -> {
+            if (isExpiration(entry.getValue())) {
+                caches.remove(entry.getKey());
+                return true;
+            }
+            return false;
+        }), 1, 1, TimeUnit.SECONDS);
+    }
 
     public T myCacheable(String key, Supplier<T> dataValue) {
         return myCacheable(key, dataValue, PERMANENT);
@@ -105,28 +66,32 @@ public class CacheImpl<T> implements Cache<T> {
                 .collect(Collectors.toList());
 
         if (!missingKeys.isEmpty()) {
+            Map<String, T> keyValues = new HashMap<>();
+            
             missingKeys.stream().forEach(key -> {
                 T value = dataValues.get().get(key);
                 if (value != null) {
-                    put(key, value, ttl);
+                    keyValues.put(key, value);
                     existingValues.set(keys.indexOf(key), value);
                 }
             });
+            multiPut(keyValues, ttl);
         }
 
         return existingValues;
     }
 
+    @Override
     public List<T> multiGet(List<String> keys) {
         return keys.stream()
                 .map(key -> get(key))
                 .collect(Collectors.toList());
     }
-    
-//    public void multiPut(List<CacheKeyValue<T>> keyValues) {
-//        keyValues.forEach(e -> caches.put(e.key, e.value));
-//    }
-    
+
+    @Override
+    public void multiPut(Map<String, T> keyValues, long ttl) {
+        keyValues.forEach((key, value) -> put(key, value, ttl));
+    }
 
     @Override
     public void put(String key, T value) {
